@@ -430,26 +430,32 @@ class MyAgent:
         - Price per share (current mid price)
         - Market value (shares * price per share)
         
-        Also displays a line for USDC (using its balance, with price assumed as $1.00).
-        Finally, prints the total portfolio net worth (USDC + market value of positions).
+        A line for USDC is included (using the 'withdrawable' cash, with price assumed as $1.00).
+        Finally, the total portfolio net worth (as defined by marginSummary["accountValue"]) is printed.
         """
         address = self.exchange.wallet.address
         state = self.info.user_state(address)
         
-        # Retrieve USDC balance from crossMarginSummary.
-        cross_margin = state.get("crossMarginSummary", {})
+        # Retrieve net worth from marginSummary ("accountValue").
+        margin_summary = state.get("marginSummary", {})
         try:
-            usdc_balance = float(cross_margin.get("accountValue", 0))
+            net_worth = float(margin_summary.get("accountValue", 0))
+        except Exception as e:
+            net_worth = 0.0
+            print("Error parsing net worth from marginSummary:", e)
+        
+        # Retrieve available USDC from 'withdrawable'.
+        try:
+            usdc_balance = float(state.get("withdrawable", 0))
         except Exception as e:
             usdc_balance = 0.0
-            print("Error parsing USDC balance:", e)
+            print("Error parsing USDC balance from withdrawable:", e)
         
-        # Get current mid prices.
+        # Retrieve current mid prices.
         mids = self.info.all_mids()
         
-        # Calculate positions value and collect details.
+        # Prepare positions details.
         positions = state.get("assetPositions", [])
-        positions_value = 0.0
         positions_details = []
         for pos in positions:
             p = pos.get("position", {})
@@ -463,29 +469,28 @@ class MyAgent:
                 price = float(mids.get(ticker, 0))
             except Exception as e:
                 price = 0.0
-                print(f"Error retrieving mid price for {ticker}: {e}")
+                print(f"Error retrieving price for {ticker}: {e}")
             market_value = shares * price
-            positions_value += market_value
             positions_details.append((ticker, shares, price, market_value))
         
-        # Net worth = USDC balance + total market value of positions.
-        net_worth = usdc_balance + positions_value
-
         # Print header.
         header = f"{'Ticker':<10} {'Shares':>15} {'Price':>15} {'Market Value':>20}"
         print(header)
         print("-" * len(header))
         
-        # Display USDC line (price assumed as $1.00).
+        # Print USDC line (assuming $1 per USDC).
         usdc_line = f"{'USDC':<10} {usdc_balance:>15.8f} {1.00:>15.2f} {usdc_balance:>20.2f}"
         print(usdc_line)
         
-        # Display each position.
+        # Print each position.
         for ticker, shares, price, market_value in positions_details:
             print(f"{ticker:<10} {shares:>15.8f} {price:>15.2f} {market_value:>20.2f}")
         
         print("-" * len(header))
-        print(f"{'Total Net Worth:':<10} {net_worth:>15.2f}")
+        # Print total portfolio net worth from marginSummary.
+        print(f"{'Total Portfolio Net Worth:':<10} {net_worth:>15.2f}")
+
+
 
     def run(self, watchlist = None,
             top_n_most_liquid = 50,

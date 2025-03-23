@@ -274,28 +274,31 @@ class MyAgent:
     def rebalance_equal_weight(self, final_picks, slippage=0.01):
         """
         Transforms your current portfolio into the target equal‑weighted portfolio (final_picks)
-        using the minimum number of trades without using margin.
+        using the minimum number of net trades, and without using margin.
 
         Steps:
         1. Retrieve current portfolio state:
-            - Available USDC is taken from state["withdrawable"].
             - Net worth is taken from crossMarginSummary["accountValue"].
-            - Current positions (and their market values) are computed using current mid prices.
+            - Available cash is taken from state["withdrawable"].
+            - Current positions are computed using current mid prices.
         2. Compute target (equal‑weight) allocation:
-            For each coin in final_picks (duplicates allowed), desired allocation (in USDC)
-            = (frequency of coin in final_picks) × (net_worth / total_slots)
-        3. For any coin held but not desired, sell the entire holding.
-        4. For each coin in the target portfolio:
-            - Compute the difference (desired – current value).
-            - If positive (under‑allocated), buy the difference using available USDC (but no more than what is available).
-            - If negative (over‑allocated), sell the excess using a reduce‑only order.
-            The order size is computed as (difference in USDC) / (mid price) and then adjusted using _adjust_order_size().
+            For each coin in final_picks (duplicates allowed),
+                desired allocation (in USDC) = (frequency of coin in final_picks) × (net_worth / total_slots)
+        3. For coins held but not in the target, sell their entire positions.
+        4. For coins in the target:
+            a. Compute diff = (desired allocation) – (current market value).
+            b. If diff is negative (over‑allocated), place one sell order for the excess amount.
+                (This will generate additional cash.)
+            c. If diff is positive (under‑allocated), place one buy order for the difference, using available cash.
+                (If available cash is insufficient, buy as much as possible.)
+            In each case, order size = (abs(diff) / mid price), adjusted to the coin’s minimum increment.
         5. Any leftover cash remains in USDC.
+        6. The final state should have a USDC balance as close to 0 as possible.
         """
         address = self.exchange.wallet.address
         state = self.info.user_state(address)
         
-        # Use net worth from crossMarginSummary; this represents your true equity.
+        # 1. Retrieve net worth and available cash.
         cross_margin = state.get("crossMarginSummary", {})
         try:
             net_worth = float(cross_margin.get("accountValue", 0))
@@ -304,18 +307,16 @@ class MyAgent:
         if net_worth <= 0:
             raise ValueError("Net worth is zero; nothing to rebalance.")
         
-        # Available cash: assume state["withdrawable"] holds available USDC (unmargined cash).
         try:
             available_cash = float(state.get("withdrawable", 0))
         except Exception as e:
             available_cash = 0.0
-            self.logger.error("Error parsing available cash: " + str(e))
+            logging.error("Error parsing available cash: " + str(e))
         
-        # Get current positions and compute their market value using current mid prices.
+        # 2. Get current positions and compute their market values.
         positions = state.get("assetPositions", [])
         mids = self.info.all_mids()
-        current_holdings = {}  # coin -> total USDC value
-        current_sizes = {}     # coin -> total size held
+        current_holdings = {}  # coin -> total USDC value of current holding
         for pos in positions:
             coin = pos.get("position", {}).get("coin")
             if not coin:
@@ -328,44 +329,39 @@ class MyAgent:
                 logging.error(f"Error processing position for {coin}: {e}")
                 continue
             current_holdings[coin] = current_holdings.get(coin, 0) + value
-            current_sizes[coin] = current_sizes.get(coin, 0) + size
 
         logging.info(f"Net worth: ${net_worth:.2f}. Available cash: ${available_cash:.2f}.")
         logging.info(f"Current holdings (USDC value): {current_holdings}")
         
-        # Total target slots is the length of final_picks.
+        # 3. Compute target allocation for each coin in final_picks.
         total_slots = len(final_picks)
         if total_slots == 0:
             logging.info("No target picks provided.")
             return
         target_each = net_worth / total_slots
-        # Compute desired allocation: for each coin in final_picks, add target_each per occurrence.
         desired_allocation = {}  # coin -> desired USDC value
         for coin in final_picks:
             desired_allocation[coin] = desired_allocation.get(coin, 0) + target_each
         logging.info(f"Desired allocation (USDC): {desired_allocation}")
         
-        # 3. For coins currently held but not in desired allocation, sell them entirely.
+        # 4a. For coins held but not in target, sell entire positions.
         for coin in list(current_holdings.keys()):
             if coin not in desired_allocation:
                 logging.info(f"Coin {coin} is held but not desired. Selling entire position.")
                 order_result = self.exchange.market_close(coin)
                 if order_result and order_result.get("status") == "ok":
                     logging.info(f"Market close for {coin} successful: {order_result}")
+                    # Simulate adding cash: assume proceeds equal current holding value.
+                    available_cash += current_holdings[coin]
                 else:
                     logging.error(f"Market close failed for {coin}: {order_result}")
-                # Remove from current holdings after selling.
                 current_holdings.pop(coin)
-                current_sizes.pop(coin, None)
                 time.sleep(2)
         
-        # 4. For each desired coin, compute net difference and trade.
+        # 4b. For each target coin, compute net difference and trade.
         for coin, desired_value in desired_allocation.items():
             current_value = current_holdings.get(coin, 0)
-            diff = desired_value - current_value  # positive: need to buy; negative: need to sell
-            if abs(diff) < 1e-6:
-                logging.info(f"For {coin}: current value meets desired allocation; no trade needed.")
-                continue
+            diff = desired_value - current_value  # positive means under‑allocated (need to buy)
             try:
                 mid_price = float(mids.get(coin, 0))
                 if mid_price <= 0:
@@ -375,30 +371,12 @@ class MyAgent:
                 logging.error(f"Error retrieving mid price for {coin}: {e}")
                 continue
             
-            if diff > 0:
-                # Need to buy additional value.
-                # Use only available cash; if available_cash is less than diff, buy only what you can.
-                cash_to_use = min(diff, available_cash)
-                if cash_to_use < diff:
-                    logging.info(f"Insufficient cash for {coin}: need ${diff:.2f} but have only ${available_cash:.2f}. Will buy with available cash.")
-                raw_size = cash_to_use / mid_price
-                adjusted_size = self._adjust_order_size(coin, raw_size)
-                if adjusted_size <= 0:
-                    logging.error(f"Adjusted order size for {coin} is zero; skipping trade.")
-                    continue
-                logging.info(f"BUY {coin}: desired additional ${diff:.2f}, using ${cash_to_use:.2f} -> order size {adjusted_size:.8f} (mid price ${mid_price:.2f})")
-                order_result = self.exchange.market_open(coin, True, adjusted_size, None, slippage)
-                if order_result and order_result.get("status") == "ok":
-                    logging.info(f"Market open order for {coin} executed: {order_result}")
-                else:
-                    logging.error(f"Market open order for {coin} failed: {order_result}")
-                available_cash -= adjusted_size * mid_price  # update cash available
-            else:
-                # Need to sell excess value.
+            if diff < 0:
+                # Over‑allocated: sell the excess.
                 raw_size = abs(diff) / mid_price
                 adjusted_size = self._adjust_order_size(coin, raw_size)
                 if adjusted_size <= 0:
-                    logging.error(f"Adjusted order size for {coin} is zero; skipping trade.")
+                    logging.error(f"Adjusted order size for {coin} is zero; skipping sell trade.")
                     continue
                 logging.info(f"SELL {coin}: excess value ${abs(diff):.2f} -> order size {adjusted_size:.8f} (mid price ${mid_price:.2f})")
                 order_result = self.exchange.order(
@@ -410,15 +388,34 @@ class MyAgent:
                     reduce_only=True
                 )
                 if order_result and order_result.get("status") == "ok":
-                    logging.info(f"Sell order for {coin} executed successfully: {order_result}")
+                    logging.info(f"Sell order for {coin} executed: {order_result}")
+                    # Simulate adding cash from sale.
+                    available_cash += adjusted_size * mid_price
                 else:
                     logging.error(f"Sell order for {coin} failed: {order_result}")
+            else:
+                # Under‑allocated: need to buy additional value.
+                # Use available_cash; if not enough, buy as much as possible.
+                cash_to_use = min(diff, available_cash)
+                if cash_to_use < diff:
+                    logging.info(f"Insufficient cash for {coin}: need ${diff:.2f} but have only ${available_cash:.2f}. Will buy with available cash.")
+                raw_size = cash_to_use / mid_price
+                adjusted_size = self._adjust_order_size(coin, raw_size)
+                if adjusted_size <= 0:
+                    logging.error(f"Adjusted order size for {coin} is zero; skipping buy trade.")
+                    continue
+                logging.info(f"BUY {coin}: under-allocated by ${diff:.2f}, using ${cash_to_use:.2f} -> order size {adjusted_size:.8f} (mid price ${mid_price:.2f})")
+                order_result = self.exchange.market_open(coin, True, adjusted_size, None, slippage)
+                if order_result and order_result.get("status") == "ok":
+                    logging.info(f"Market open order for {coin} executed: {order_result}")
+                    available_cash -= adjusted_size * mid_price
+                else:
+                    logging.error(f"Market open order for {coin} failed: {order_result}")
             time.sleep(2)
         
-        # 6. Log the final state.
+        # 6. Log final state.
         final_state = self.info.user_state(address)
         logging.info(f"Rebalance complete. Final state for {address}: {final_state}")
-
 
 
     def display_positions(self):

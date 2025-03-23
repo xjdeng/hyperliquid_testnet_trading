@@ -390,49 +390,63 @@ class MyAgent:
 
     def display_positions(self):
         """
-        Retrieves and prints the current portfolio positions line by line.
-        For each position, it displays:
+        Retrieves and displays the current portfolio positions line by line.
+        For each position, it shows:
         - Ticker
-        - Shares held (szi)
-        - Market value in dollars (shares * current mid price)
-        It also prints the USDC balance and, at the end, the total portfolio value.
+        - # Shares held
+        - Price per share (current mid price)
+        - Market value (shares * price per share)
+        
+        A line for USDC is included (using its balance, with price=1.0).
+        Finally, the total portfolio value (USDC + market value of positions) is printed.
         """
-        # Get the account state using the wallet address.
         address = self.exchange.wallet.address
         state = self.info.user_state(address)
         
-        # Get current USDC balance from crossMarginSummary.
-        balance_summary = state.get("crossMarginSummary", {})
+        # Retrieve USDC balance from crossMarginSummary.
+        cross_margin = state.get("crossMarginSummary", {})
         try:
-            usdc_balance = float(balance_summary.get("accountValue", 0))
+            usdc_balance = float(cross_margin.get("accountValue", 0))
         except Exception as e:
             usdc_balance = 0.0
-            print(f"Error parsing USDC balance: {e}")
+            print("Error parsing USDC balance:", e)
         
-        # Retrieve current mid prices for assets.
+        # Get mid prices.
         mids = self.info.all_mids()
         
+        # Initialize total portfolio value with USDC balance.
         total_value = usdc_balance
-        print(f"USDC: ${usdc_balance:.2f}")
+
+        # Print header.
+        header = f"{'Ticker':<10} {'Shares':>15} {'Price':>15} {'Market Value':>20}"
+        print(header)
+        print("-" * len(header))
         
+        # Display USDC line.
+        usdc_line = f"{'USDC':<10} {usdc_balance:>15.8f} {1.00:>15.2f} {usdc_balance:>20.2f}"
+        print(usdc_line)
+        
+        # Iterate over positions.
         positions = state.get("assetPositions", [])
-        if positions:
-            for pos in positions:
-                p = pos.get("position", {})
-                coin = p.get("coin", "Unknown")
-                try:
-                    shares = float(p.get("szi", 0))
-                except Exception as e:
-                    shares = 0.0
-                    print(f"Error parsing shares for {coin}: {e}")
-                mid_price = float(mids.get(coin, 0))
-                market_value = shares * mid_price
-                total_value += market_value
-                print(f"{coin}: {shares:.8f} shares, Market Value: ${market_value:.2f}")
-        else:
-            print("No open positions.")
+        for pos in positions:
+            p = pos.get("position", {})
+            ticker = p.get("coin", "Unknown")
+            try:
+                shares = float(p.get("szi", 0))
+            except Exception as e:
+                shares = 0.0
+                print(f"Error parsing shares for {ticker}: {e}")
+            try:
+                price = float(mids.get(ticker, 0))
+            except Exception as e:
+                price = 0.0
+                print(f"Error retrieving mid price for {ticker}: {e}")
+            market_value = shares * price
+            total_value += market_value
+            print(f"{ticker:<10} {shares:>15.8f} {price:>15.2f} {market_value:>20.2f}")
         
-        print(f"Total Portfolio Value: ${total_value:.2f}")
+        print("-" * len(header))
+        print(f"{'Total Portfolio Value:':<10} {total_value:>15.2f}")
 
     def run(self, watchlist = None,
             top_n_most_liquid = 50,

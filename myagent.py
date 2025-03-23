@@ -4,7 +4,7 @@ from hyperliquid.info import Info
 from hyperliquid.utils import constants
 from google.colab import userdata
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import time
@@ -59,7 +59,7 @@ class MyAgent:
         return top_markets
     
     def _get_hourly_candles(self, coin, lookback_hours=24):
-        now = datetime.datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         start = now - timedelta(hours=lookback_hours)
         start_ts = int(start.timestamp() * 1000)
         end_ts = int(now.timestamp() * 1000)

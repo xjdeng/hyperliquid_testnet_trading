@@ -59,7 +59,9 @@ class MyAgent:
         return top_markets
     
     def _get_hourly_candles(self, coin, lookback_hours=24):
+        print("here1")
         now = datetime.now(timezone.utc)
+        print("here2")
         start = now - timedelta(hours=lookback_hours)
         start_ts = int(start.timestamp() * 1000)
         end_ts = int(now.timestamp() * 1000)
@@ -134,7 +136,7 @@ class MyAgent:
             name = market["name"]
             try:
                 candles = self._safe_get_candles(name, lookback_hours = lookback_hours)
-                if len(candles) < 24:
+                if len(candles) < lookback_hours:
                     print(f"Not enough data for {name}.")
                     continue  # skip if insufficient data
                 points = self._prepare_ohlc_points(candles)  # 96 points total (24 bars * 4 OHLC points)

@@ -26,7 +26,9 @@ To simplfy the trading process, I actually sell all of the current securities to
 
 Since this strategy looks at an hourly candlestick chart when calculating the regression line and sharpe ratios, I'd recommend waiting at least 1 hour before rerunning and getting a new set of picks.  Since liquidity doesn't change much hour to hour, it may suffice to go back to step 2.
 
-## Further improvements, esp collaboration with other agents.
+## Further improvements, esp collaboration with other agents (and other things I haven't figured out in the limited amount of time)
 
 - Instead of manually fetching news from Duckduckgo, you could have another agent with the sole job of scraping news and populating a database with the latest news on various securities. You'll need to scrape social media sites like X, Reddit, and various crypto forums fairly frequently (say once every several minutes) while refreshing the web search results less frequently (say every several hours) depending on your trading timeframe.  This agent could serve multiple trading agents.  With this, we'll want to pull from this database in Stage 3.
 - You can have another agent manage multiple trading agents like this one. While each agent might have "tunnel vision" on a particular strategy, the manager agent could assess the performance of all of the agents it's overseeing and allocate capital from one agent to another since not every strategy works well in all different market environments and it can employ a data-driven approach to periodically reallocating capital to each.  The manager would either need access to each of its subordinate agents' wallets or each agent should have a "backdoor" function to execute trades that were specifically ordered by the master agent.
+- Sometimes, trades don't go thru for various odd reasons and we need a more robust system to make sure they go through (maybe using an LLM to guide the process?)
+- For some reason, the program seems to always buy securities on margin even if there is plenty of USDC available. Ideally, we don't want to use margin if it's not necessary.

@@ -271,7 +271,7 @@ class MyAgent:
                 logging.error(f"Market close failed for {coin}: {order_result}")
             time.sleep(2)  # small pause between orders
 
-    def rebalance_equal_weight_no_margin(self, final_picks, slippage=0.01):
+    def rebalance_equal_weight(self, final_picks, slippage=0.01):
         """
         Rebalances your current portfolio into the target equal‑weighted portfolio defined by final_picks
         using the minimum number of trades—all without using margin.

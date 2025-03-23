@@ -18,8 +18,8 @@ from math import floor
 
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-logging.debug("Logging is working")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.info("Logging is working")
 
 class Sentiment(enum.Enum):
   negative = "negative"
@@ -388,6 +388,52 @@ class MyAgent:
         final_state = self.info.user_state(address)
         logging.info(f"Rebalance complete. Final state for {address}: {final_state}")
 
+    def display_positions(self):
+        """
+        Retrieves and prints the current portfolio positions line by line.
+        For each position, it displays:
+        - Ticker
+        - Shares held (szi)
+        - Market value in dollars (shares * current mid price)
+        It also prints the USDC balance and, at the end, the total portfolio value.
+        """
+        # Get the account state using the wallet address.
+        address = self.exchange.wallet.address
+        state = self.info.user_state(address)
+        
+        # Get current USDC balance from crossMarginSummary.
+        balance_summary = state.get("crossMarginSummary", {})
+        try:
+            usdc_balance = float(balance_summary.get("accountValue", 0))
+        except Exception as e:
+            usdc_balance = 0.0
+            print(f"Error parsing USDC balance: {e}")
+        
+        # Retrieve current mid prices for assets.
+        mids = self.info.all_mids()
+        
+        total_value = usdc_balance
+        print(f"USDC: ${usdc_balance:.2f}")
+        
+        positions = state.get("assetPositions", [])
+        if positions:
+            for pos in positions:
+                p = pos.get("position", {})
+                coin = p.get("coin", "Unknown")
+                try:
+                    shares = float(p.get("szi", 0))
+                except Exception as e:
+                    shares = 0.0
+                    print(f"Error parsing shares for {coin}: {e}")
+                mid_price = float(mids.get(coin, 0))
+                market_value = shares * mid_price
+                total_value += market_value
+                print(f"{coin}: {shares:.8f} shares, Market Value: ${market_value:.2f}")
+        else:
+            print("No open positions.")
+        
+        print(f"Total Portfolio Value: ${total_value:.2f}")
+
     def run(self, watchlist = None,
             top_n_most_liquid = 50,
             n_hours_lookback = 24,
@@ -400,7 +446,11 @@ class MyAgent:
             
             ranked_markets = self.calculate_signal_scores(watchlist, n_hours_lookback)
             final_picks = self.get_final_picks(ranked_markets, n = n_picks)
+            print("Current Portfolio:\n\n")
+            self.display_positions()
             self.rebalance_equal_weight(final_picks)
+            print("Portfolio after trading:\n\n")
+            self.display_positions()
             waittime = 3600*hours_holding_period
             print(f"\n\n\nWaiting {waittime} seconds before trading agian.")
             time.sleep(waittime)

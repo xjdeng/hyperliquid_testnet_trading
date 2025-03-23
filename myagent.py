@@ -426,12 +426,12 @@ class MyAgent:
         Retrieves and displays the current portfolio positions line by line.
         For each position, it shows:
         - Ticker
-        - # Shares held
+        - Number of Shares held
         - Price per share (current mid price)
         - Market value (shares * price per share)
         
-        A line for USDC is included (using its balance, with price=1.0).
-        Finally, the total portfolio value (USDC + market value of positions) is printed.
+        Also displays a line for USDC (using its balance, with price assumed as $1.00).
+        Finally, prints the total portfolio net worth (USDC + market value of positions).
         """
         address = self.exchange.wallet.address
         state = self.info.user_state(address)
@@ -444,23 +444,13 @@ class MyAgent:
             usdc_balance = 0.0
             print("Error parsing USDC balance:", e)
         
-        # Get mid prices.
+        # Get current mid prices.
         mids = self.info.all_mids()
         
-        # Initialize total portfolio value with USDC balance.
-        total_value = usdc_balance
-
-        # Print header.
-        header = f"{'Ticker':<10} {'Shares':>15} {'Price':>15} {'Market Value':>20}"
-        print(header)
-        print("-" * len(header))
-        
-        # Display USDC line.
-        usdc_line = f"{'USDC':<10} {usdc_balance:>15.8f} {1.00:>15.2f} {usdc_balance:>20.2f}"
-        print(usdc_line)
-        
-        # Iterate over positions.
+        # Calculate positions value and collect details.
         positions = state.get("assetPositions", [])
+        positions_value = 0.0
+        positions_details = []
         for pos in positions:
             p = pos.get("position", {})
             ticker = p.get("coin", "Unknown")
@@ -475,11 +465,27 @@ class MyAgent:
                 price = 0.0
                 print(f"Error retrieving mid price for {ticker}: {e}")
             market_value = shares * price
-            total_value += market_value
+            positions_value += market_value
+            positions_details.append((ticker, shares, price, market_value))
+        
+        # Net worth = USDC balance + total market value of positions.
+        net_worth = usdc_balance + positions_value
+
+        # Print header.
+        header = f"{'Ticker':<10} {'Shares':>15} {'Price':>15} {'Market Value':>20}"
+        print(header)
+        print("-" * len(header))
+        
+        # Display USDC line (price assumed as $1.00).
+        usdc_line = f"{'USDC':<10} {usdc_balance:>15.8f} {1.00:>15.2f} {usdc_balance:>20.2f}"
+        print(usdc_line)
+        
+        # Display each position.
+        for ticker, shares, price, market_value in positions_details:
             print(f"{ticker:<10} {shares:>15.8f} {price:>15.2f} {market_value:>20.2f}")
         
         print("-" * len(header))
-        print(f"{'Total Portfolio Value:':<10} {total_value:>15.2f}")
+        print(f"{'Total Net Worth:':<10} {net_worth:>15.2f}")
 
     def run(self, watchlist = None,
             top_n_most_liquid = 50,

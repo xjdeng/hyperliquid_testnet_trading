@@ -59,7 +59,7 @@ class MyAgent:
         return top_markets
     
     def _get_hourly_candles(self, coin, lookback_hours=24):
-        now = datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         start = now - timedelta(hours=lookback_hours)
         start_ts = int(start.timestamp() * 1000)
         end_ts = int(now.timestamp() * 1000)
